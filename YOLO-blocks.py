@@ -10,6 +10,11 @@ Created on Mon Feb 10 12:18:29 2020
 from tensorflow.keras.layers import Layer
 from tensorflow.keras import Model
 
+import tensorflow as tf
+from tensorflow.compat.v1 import InteractiveSession
+config = tf.compat.v1.ConfigProto()
+config.gpu_options.allow_growth = True
+session = InteractiveSession(config=config)
 
 
 #Import basic blocks
@@ -39,7 +44,7 @@ class BasicBlock(Layer):
         #pad = (kernel_size-1)//2
         self.conv = Conv2D(self.num_filters,
                            kernel_size=self.kernel_size,
-                           strides=1,
+                           strides=(np.int64(1),np.int64(1)),
                            padding="same",
                            use_bias = not self.batch_norm)
 
@@ -109,42 +114,65 @@ class TinyYOLOv3(Model):
 
     def call(self,inputs):
         #start = time.time()
-        print(inputs.shape)
+        #print(inputs.shape)
         yolo1 = self.block1(inputs)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1 = self.block2(yolo1)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1 = self.block3(yolo1)
         yolo1 = self.block4(yolo1)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1,root = self.block5(yolo1)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1 = self.block6(yolo1)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1 = self.block7(yolo1)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1_branch = self.block8(yolo1)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1 = self.block9(yolo1_branch)
-        print(yolo1.shape)
+        #print(yolo1.shape)
         yolo1 = self.block10(yolo1)
-        print(yolo1.shape)
+        #print(yolo1.shape)
 
         yolo2 = self.block11(yolo1_branch)
-        print(yolo2.shape)
+        #print(yolo2.shape)
         yolo2 = self.upsamp(yolo2)
-        print(yolo2.shape)
+        #print(yolo2.shape)
         yolo2 = self.concat_block([yolo2,root])
-        print(yolo2.shape)
+        #print(yolo2.shape)
         yolo2 = self.block12(yolo2)
-        print(yolo2.shape)
+        #print(yolo2.shape)
         yolo2 = self.block13(yolo2)
-        print(yolo2.shape)
+        #print(yolo2.shape)
         #finish = ime.time()
 
         return (yolo1,yolo2)
 
 a = TinyYOLOv3(num_classes = 1,bouding_boxes="prueba")
 
-sample_image = np.float32(np.random.random(size=(8,416,416,3)))
-test = a(inputs = sample_image)
+sample_image = np.float32(np.random.random(size=(1,416,416,3)))
+#test = a(inputs = sample_image)
+
+a.build(batch_input_shape=(None,416,416,3))
+
+@tf.function
+def prueba(x):
+	return x
+
+import time
+
+tiempo= []
+for i in range(1000):
+	if i%100==0:
+		print(i)
+	inicio = time.time()
+	aux = prueba(sample_image)
+	fin = time.time()
+
+	tiempo.append(fin-inicio)
+
+
+import numpy as np
+print(np.median(tiempo))
+

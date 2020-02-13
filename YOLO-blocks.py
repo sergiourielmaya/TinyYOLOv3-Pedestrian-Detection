@@ -59,7 +59,7 @@ class BasicBlock(Layer):
             self.max_pool = MaxPool2D(pool_size =(2,2), strides= (self.max_pool_stride,self.max_pool_stride))
 
         self.act = LeakyReLU(0.1)
-
+    
     def call(self,X):
 
         x= self.conv(X)
@@ -151,14 +151,14 @@ class TinyYOLOv3(Model):
 
 a = TinyYOLOv3(num_classes = 1,bouding_boxes="prueba")
 
-sample_image = np.float32(np.random.random(size=(1,416,416,3)))
+sample_image = np.float32(np.random.random(size=(30,416,416,3)))
 #test = a(inputs = sample_image)
 
 a.build(batch_input_shape=(None,416,416,3))
 
 @tf.function
 def prueba(x):
-	return x
+	return a(x)
 
 import time
 
@@ -167,12 +167,13 @@ for i in range(1000):
 	if i%100==0:
 		print(i)
 	inicio = time.time()
-	aux = prueba(sample_image)
+	aux1,aux2 = prueba(sample_image)
 	fin = time.time()
 
 	tiempo.append(fin-inicio)
 
 
 import numpy as np
+print(aux1.shape)
 print(np.median(tiempo))
-
+print(np.mean(tiempo))

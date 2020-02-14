@@ -66,7 +66,6 @@ class BasicBlock(Layer):
 
         if self.batch_norm:
             x_root = self.bn(x)
-
         else:
             x_root = x
 
@@ -82,6 +81,18 @@ class BasicBlock(Layer):
             return x,x_root
         else:
             return x
+
+class PredictionLayer(Layer):
+
+    def __init__(self,anchor_boxes,conf_thresh,grid):
+        super(PredictionLayer,self).__init__()
+
+        self.anchors = anchor_boxes
+        self.conf_thresh = conf_thresh
+        self.grid = grid
+
+
+
 
 
 
@@ -99,10 +110,10 @@ class TinyYOLOv3(Model):
         self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False)
         self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False)
         self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False)
-        self.block10 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
+        self.block10 = BasicBlock(num_filters = 10, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
         self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False)
         self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False)
-        self.block13 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
+        self.block13 = BasicBlock(num_filters = 10, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
         self.concat_block = Concatenate(axis=-1)
         self.upsamp = UpSampling2D(size = 2,interpolation = "nearest")
 
@@ -111,7 +122,7 @@ class TinyYOLOv3(Model):
 
     def build(self,batch_input_shape):
         super().build(batch_input_shape)
-
+    @tf.function
     def call(self,inputs):
         #start = time.time()
         #print(inputs.shape)
@@ -146,17 +157,20 @@ class TinyYOLOv3(Model):
         yolo2 = self.block13(yolo2)
         #print(yolo2.shape)
         #finish = ime.time()
-
+        yolo1 = tf.reshape(yolo1,(-1,13,13,2,5))
+        yolo2 = tf.reshape(yolo2,(-1,26,26,2,5))
         return (yolo1,yolo2)
 
 a = TinyYOLOv3(num_classes = 1,bouding_boxes="prueba")
 
-sample_image = np.float32(np.random.random(size=(30,416,416,3)))
+sample_image = np.float32(np.random.random(size=(1,416,416,3)))
 #test = a(inputs = sample_image)
 
 a.build(batch_input_shape=(None,416,416,3))
 
-@tf.function
+print(a.summary())
+
+#@tf.function
 def prueba(x):
 	return a(x)
 
@@ -167,7 +181,7 @@ for i in range(1000):
 	if i%100==0:
 		print(i)
 	inicio = time.time()
-	aux1,aux2 = prueba(sample_image)
+	aux1,aux2 = a(sample_image)
 	fin = time.time()
 
 	tiempo.append(fin-inicio)
@@ -175,5 +189,6 @@ for i in range(1000):
 
 import numpy as np
 print(aux1.shape)
+print(aux2.shape)
 print(np.median(tiempo))
 print(np.mean(tiempo))

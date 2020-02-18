@@ -84,17 +84,27 @@ class BasicBlock(Layer):
 
 class PredictionLayer(Layer):
 
-    def __init__(self,anchor_boxes,conf_thresh,grid):
+    def __init__(self,anchor_boxes,conf_thresh,grid_size):
         super(PredictionLayer,self).__init__()
 
         self.anchors = anchor_boxes
         self.conf_thresh = conf_thresh
-        self.grid = grid
+        self.grid_size = grid_size
+        self.cx = tf.tile(tf.reshape(tf.repeat(tf.linspace(0.,1,grid_size)[tf.newaxis,:],grid_size,axis=0),shape=(grid_size,grid_size))[:,:,tf.newaxis],tf.constant([1,1,2]))[:,:,:,tf.newaxis] 
+        self.cy = tf.tile(tf.reshape(tf.repeat(tf.linspace(0.,1,grid_size)[:,tf.newaxis],grid_size,axis=0),shape=(grid_size,grid_size))[:,:,tf.newaxis],tf.constant([1,1,2]))[:,:,:,tf.newaxis]
+    def call(self, X):
 
+        box_x,box_y,box_w,box_h,objectness = tf.split(X, (1,1,1,1,1), axis=-1)
 
+        box_x = tf.sigmoid(box_x) + self.cx
+        box_y = tf.sigmoid(box_y) + self.cy
+        box_w = self.anchors[:,0]*tf.exp(box_w)
+        box_h = self.anchors[:,1]*tf.exp(box_h)
+        objectness = tf.sigmoid(objectness)
 
+        return (box_x,box_y,box_w,box_h,objectness)
 
-
+#tf.keras.backend.clear_session()
 
 class TinyYOLOv3(Model):
 
@@ -116,6 +126,8 @@ class TinyYOLOv3(Model):
         self.block13 = BasicBlock(num_filters = 10, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
         self.concat_block = Concatenate(axis=-1)
         self.upsamp = UpSampling2D(size = 2,interpolation = "nearest")
+        self.yolo1 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=13)
+        self.yolo2 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=26)
 
         #self.final_yolo1 = YOLO_Layer(80,torch.tensor(np.array([[81.,82.],[135.,169.],[344.,319.]])),0.5,13)
         #self.final_yolo2 = YOLO_Layer(80,torch.tensor(np.array([[10.,14.],[23.,27.],[37.,58.]])),0.5,26)
@@ -124,46 +136,33 @@ class TinyYOLOv3(Model):
         super().build(batch_input_shape)
     @tf.function
     def call(self,inputs):
-        #start = time.time()
-        #print(inputs.shape)
+
         yolo1 = self.block1(inputs)
-        #print(yolo1.shape)
         yolo1 = self.block2(yolo1)
-        #print(yolo1.shape)
         yolo1 = self.block3(yolo1)
         yolo1 = self.block4(yolo1)
-        #print(yolo1.shape)
         yolo1,root = self.block5(yolo1)
-        #print(yolo1.shape)
         yolo1 = self.block6(yolo1)
-        #print(yolo1.shape)
         yolo1 = self.block7(yolo1)
-        #print(yolo1.shape)
         yolo1_branch = self.block8(yolo1)
-        #print(yolo1.shape)
         yolo1 = self.block9(yolo1_branch)
-        #print(yolo1.shape)
         yolo1 = self.block10(yolo1)
-        #print(yolo1.shape)
-
         yolo2 = self.block11(yolo1_branch)
-        #print(yolo2.shape)
         yolo2 = self.upsamp(yolo2)
-        #print(yolo2.shape)
         yolo2 = self.concat_block([yolo2,root])
-        #print(yolo2.shape)
         yolo2 = self.block12(yolo2)
-        #print(yolo2.shape)
         yolo2 = self.block13(yolo2)
-        #print(yolo2.shape)
-        #finish = ime.time()
         yolo1 = tf.reshape(yolo1,(-1,13,13,2,5))
         yolo2 = tf.reshape(yolo2,(-1,26,26,2,5))
-        return (yolo1,yolo2)
+
+        output1 = self.yolo1(yolo1)
+        output2 = self.yolo2(yolo2)
+        return (output1,output2)
+
 
 a = TinyYOLOv3(num_classes = 1,bouding_boxes="prueba")
 
-sample_image = np.float32(np.random.random(size=(1,416,416,3)))
+sample_image = np.float32(np.random.random(size=(16,416,416,3)))
 #test = a(inputs = sample_image)
 
 a.build(batch_input_shape=(None,416,416,3))
@@ -192,3 +191,8 @@ print(aux1.shape)
 print(aux2.shape)
 print(np.median(tiempo))
 print(np.mean(tiempo))
+
+
+#prueba = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=26)
+#prueba.build(batch_input_shape=(None,26,26,2,5))
+#print(prueba.summary)

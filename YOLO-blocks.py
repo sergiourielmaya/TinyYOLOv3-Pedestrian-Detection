@@ -12,7 +12,10 @@ from tensorflow.keras import Model
 
 import tensorflow as tf
 from tensorflow.compat.v1 import InteractiveSession
-config = tf.compat.v1.ConfigProto()
+
+gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8) #Allocate more memory to Tensorflow
+
+config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
 config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 
@@ -92,9 +95,24 @@ class PredictionLayer(Layer):
         self.grid_size = grid_size
         self.cx = tf.tile(tf.reshape(tf.repeat(tf.linspace(0.,1,grid_size)[tf.newaxis,:],grid_size,axis=0),shape=(grid_size,grid_size))[:,:,tf.newaxis],tf.constant([1,1,2]))[:,:,:,tf.newaxis] 
         self.cy = tf.tile(tf.reshape(tf.repeat(tf.linspace(0.,1,grid_size)[:,tf.newaxis],grid_size,axis=0),shape=(grid_size,grid_size))[:,:,tf.newaxis],tf.constant([1,1,2]))[:,:,:,tf.newaxis]
+
+        x = tf.range(self.grid_size, dtype=tf.float32)
+        y = tf.range(self.grid_size, dtype=tf.float32)
+        x_offset, y_offset = tf.meshgrid(x, y)
+        x_offset = tf.reshape(x_offset, (-1, 1))
+        y_offset = tf.reshape(y_offset, (-1, 1))
+        x_y_offset = tf.concat([x_offset, y_offset], axis=-1)
+        x_y_offset = tf.tile(x_y_offset, [1, n_anchors])
+        x_y_offset = tf.reshape(x_y_offset, [1, -1, 2])     
+        #x_y_offset es de tamaño (None,grid_size*grid_size*num_anchors,2)
+        self.x_y_offset = x_y_offset
+
     def call(self, X):
 
-        box_x,box_y,box_w,box_h,objectness = tf.split(X, (1,1,1,1,1), axis=-1)
+        box_xy,box_wh,objectness = tf.split(X, (2,2,1), axis=-1)
+        print("Hola")
+        print(box_w.shape)
+        print(box_h.shape)
 
         box_x = tf.sigmoid(box_x) + self.cx
         box_y = tf.sigmoid(box_y) + self.cy
@@ -129,9 +147,6 @@ class TinyYOLOv3(Model):
         self.yolo1 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=13)
         self.yolo2 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=26)
 
-        #self.final_yolo1 = YOLO_Layer(80,torch.tensor(np.array([[81.,82.],[135.,169.],[344.,319.]])),0.5,13)
-        #self.final_yolo2 = YOLO_Layer(80,torch.tensor(np.array([[10.,14.],[23.,27.],[37.,58.]])),0.5,26)
-
     def build(self,batch_input_shape):
         super().build(batch_input_shape)
     @tf.function
@@ -162,12 +177,13 @@ class TinyYOLOv3(Model):
 
 a = TinyYOLOv3(num_classes = 1,bouding_boxes="prueba")
 
-sample_image = np.float32(np.random.random(size=(16,416,416,3)))
+#a.build_graph((32,10,))
+print(a.summary)
+
+sample_image = np.float32(np.random.random(size=(8,416,416,3)))
 #test = a(inputs = sample_image)
 
 a.build(batch_input_shape=(None,416,416,3))
-
-print(a.summary())
 
 #@tf.function
 def prueba(x):
@@ -187,8 +203,12 @@ for i in range(1000):
 
 
 import numpy as np
-print(aux1.shape)
-print(aux2.shape)
+
+for i in aux1:
+    print(i.shape)
+
+#print(aux1.shape)
+#print(aux2.shape)
 print(np.median(tiempo))
 print(np.mean(tiempo))
 

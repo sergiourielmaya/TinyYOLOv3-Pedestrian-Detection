@@ -215,15 +215,98 @@ class TinyYOLOv3(Model):
         #return (yolo1,yolo2)
 
 
+class TinyConvnet(Model):
+    def __init__(self,num_classes,bouding_boxes,**kwargs):
+        super(TinyConvnet,self).__init__()
+
+        self.block1 = BasicBlock(num_filters = 16, kernel_size = 3)
+        self.block2 = BasicBlock(num_filters = 32, kernel_size = 3)
+        self.block3 = BasicBlock(num_filters = 64, kernel_size = 3)
+        self.block4 = BasicBlock(num_filters = 128, kernel_size = 3)
+        self.block5 = BasicBlock(num_filters = 256, kernel_size = 3, root = True)
+        self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1)
+        self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False)
+        self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False)
+        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False)
+        self.block10 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
+        self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False)
+        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False)
+        self.block13 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
+        self.concat_block = Concatenate(axis=-1)
+        self.upsamp = UpSampling2D(size = 2,interpolation = "nearest")
+    def build(self,batch_input_shape):
+        super().build(batch_input_shape)
+    @tf.function
+    def call(self,inputs):
+
+        yolo1 = self.block1(inputs)
+        yolo1 = self.block2(yolo1)
+        yolo1 = self.block3(yolo1)
+        yolo1 = self.block4(yolo1)
+        yolo1,root = self.block5(yolo1)
+        yolo1 = self.block6(yolo1)
+        yolo1 = self.block7(yolo1)
+        yolo1_branch = self.block8(yolo1)
+        yolo1 = self.block9(yolo1_branch)
+        yolo1 = self.block10(yolo1)
+        yolo2 = self.block11(yolo1_branch)
+        yolo2 = self.upsamp(yolo2)
+        yolo2 = self.concat_block([yolo2,root])
+        yolo2 = self.block12(yolo2)
+        yolo2 = self.block13(yolo2)
+        
+        return yolo1,yolo2    
 
 
 
+def ReadModelConfig(config_file):
+    '''
+    Lee el archivo de configuración de la arquitectura YOLO y TINY-YOLO
+
+    Entrada:
+    config_file: Archivo con extensión .cfg que contiene la configuración
+                 de las arquitecturas hechas en Darknet
+
+    Salida:
+    bloques:     Lista de diccionarios donde cada diccionario contiene la
+                 configuración de cada bloque de operación
+
+    '''
+
+    #Lee el archivo de configuración
+    config = open(config_file, "r")
+    #Divide por salto de línea
+    lineas = config.read().split("\n")
+    #Crea una lista de cada linea que no inicia con #
+    lineas = [x for x in lineas if x and not x.startswith('#')]
+    #Elimina espacias en blanco por la izq. y der.
+    lineas = [x.rstrip().lstrip() for x in lineas]
+
+    blocks = []
+    for line in lineas:
+
+        #Guarda el el tipo de operación
+        if line.startswith("["):
+            blocks.append(dict())
+            blocks[-1]["type"] = line[1:-1].rstrip()
+
+        #Configuración de la operación
+        else:
+            key,value = line.split("=")
+            #print(value)
+            blocks[-1][key.rstrip()] = value.lstrip()
+
+    return blocks
+#prueba = ReadModelConfig("yolov3-tiny.cfg")
 
 
+#a = TinyYOLOv3(num_classes = 80,bouding_boxes="prueba")
 
+'''
+b = TinyConvnet(80,None)
+b.build(batch_input_shape=(None,416,416,3))
+print(b.summary())
 
-
-a = TinyYOLOv3(num_classes = 80,bouding_boxes="prueba")
 
 #a.build_graph((32,10,))
 print(a.summary)
@@ -250,13 +333,13 @@ import numpy as np
 
 print(aux1.shape)
 print(aux2.shape)
-'''
+
 for i in aux1:
     print(i.shape)
 
 for i in aux2:
     print(i.shape)
-'''
+
 #print(aux1.shape)
 #print(aux2.shape)
 print(np.array(tiempo).shape)
@@ -269,3 +352,5 @@ plt.show()
 #prueba = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=26)
 #prueba.build(batch_input_shape=(None,26,26,2,5))
 #print(prueba.summary)
+
+'''

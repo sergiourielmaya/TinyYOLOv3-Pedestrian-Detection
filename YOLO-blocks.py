@@ -12,22 +12,34 @@ from tensorflow.keras import Model
 
 import tensorflow as tf
 from tensorflow.compat.v1 import InteractiveSession
+#from tensorflow.compat.v1.image import non_max_suppression_v2
 
 gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8) #Allocate more memory to Tensorflow
-
+#Arregla un bug donde marca un error con CUDA
 config = tf.compat.v1.ConfigProto(gpu_options=gpu_options)
 config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 
-
-#Import basic blocks
+#Import bloques basicos
 from tensorflow.keras.layers import Conv2D,BatchNormalization,ZeroPadding2D,MaxPool2D, LeakyReLU,UpSampling2D,Concatenate
-
 import numpy as np
-import matplotlib as plt
+import matplotlib.pyplot as plt
+
 
 
 class BasicBlock(Layer):
+    '''
+    Clase que define el Layer "Basic Block", un boque que utiliaz operadores: covolución, Max Pooling,Batch Normalization, Leaky ReLU.
+    Argumentos
+    num_filter: Entero, número de filtros de la operación de convolución, default 3
+    kernel_size: Entero, tamaño de los filtros de la capa de convolución, default 3
+    max_pooling: Booleano, Si despupes de la operación de convolución existe un Max pooling, default True
+    max_pool_stride: ENtero, EL valor de stride de la operación de max_pooling, si hay.
+    activation: TensorFlow Class, FUnción de activación a utilizar en la capa de convolución.
+    batch_norm: Booleano, Si la capa tiene la operación Batch Normalization
+    root: Booleano, Indica si exite la salida para la piramide de características
+    '''
+
     def __init__(self,num_filters=3,
                  kernel_size=3,
                  max_pooling=True,
@@ -43,8 +55,6 @@ class BasicBlock(Layer):
         self.max_pooling = max_pooling
         self.max_pool_stride = max_pool_stride
         self.root = root
-
-        #pad = (kernel_size-1)//2
         self.conv = Conv2D(self.num_filters,
                            kernel_size=self.kernel_size,
                            strides=(np.int64(1),np.int64(1)),
@@ -86,43 +96,69 @@ class BasicBlock(Layer):
             return x
 
 class PredictionLayer(Layer):
+    '''
+    Clase de la clase Prediction Layer. ESta capa calcula las predicciones de la red, calcula las coordenadas (x,y) y las dimensiones (w,h)
+    del Bouding box. Aplica finalemnte Non max supression para eliminar los bouding boxes redundantes.
+    Argumentos:
+    Anchor_boxes: List, Lista de los Anchorx Boxes para la PredictionLayer, para el caso de TInyYOLOv3-pedestrian son 2 anchor boxes
+    conf_thresh: Float [0,1] Umbral para el algoritmo de NMS.
+    grid_size: Integer, Tamaño del tensor de que recibe la capa como entrada , (grid_size,grid_size,num_anchors*(5+num_classes))
+    num_classes: Entero, número de clases a detectar, default 1
+    '''
 
-    def __init__(self,anchor_boxes,conf_thresh,grid_size):
+    def __init__(self,anchor_boxes,grid_size,conf_thresh,num_classes):
         super(PredictionLayer,self).__init__()
+        self.num_anchors = len(anchor_boxes)
+        self.num_classes = num_classes
 
-        self.anchors = anchor_boxes
+        if self.num_classes==1:
+            self.final_conv_length = 5
+        else:
+            self.final_conv_length = 5+ self.num_classes
+        self.anchors_boxes = anchor_boxes #a list of list
         self.conf_thresh = conf_thresh
         self.grid_size = grid_size
-        self.cx = tf.tile(tf.reshape(tf.repeat(tf.linspace(0.,1,grid_size)[tf.newaxis,:],grid_size,axis=0),shape=(grid_size,grid_size))[:,:,tf.newaxis],tf.constant([1,1,2]))[:,:,:,tf.newaxis] 
-        self.cy = tf.tile(tf.reshape(tf.repeat(tf.linspace(0.,1,grid_size)[:,tf.newaxis],grid_size,axis=0),shape=(grid_size,grid_size))[:,:,tf.newaxis],tf.constant([1,1,2]))[:,:,:,tf.newaxis]
-
+        #Anchor boxes en forma matricial de tamaño (grid_size*grid_size*anchors,2)
+        self.anchors_matrix =tf.cast(tf.tile(anchor_boxes,[self.grid_size*self.grid_size,1]),dtype=tf.float32)
+        
         x = tf.range(self.grid_size, dtype=tf.float32)
         y = tf.range(self.grid_size, dtype=tf.float32)
         x_offset, y_offset = tf.meshgrid(x, y)
         x_offset = tf.reshape(x_offset, (-1, 1))
         y_offset = tf.reshape(y_offset, (-1, 1))
         x_y_offset = tf.concat([x_offset, y_offset], axis=-1)
-        x_y_offset = tf.tile(x_y_offset, [1, n_anchors])
+        x_y_offset = tf.tile(x_y_offset, [1, self.num_anchors])
         x_y_offset = tf.reshape(x_y_offset, [1, -1, 2])     
-        #x_y_offset es de tamaño (None,grid_size*grid_size*num_anchors,2)
+        #x_y_offset es de tamaño (None,grid_size*grid_size*num_anchors,2) y asi ya es invariante del tamaño del grid.
         self.x_y_offset = x_y_offset
+
+        self.strides = 1./ self.grid_size
+
+
+        
 
     def call(self, X):
 
-        box_xy,box_wh,objectness = tf.split(X, (2,2,1), axis=-1)
-        print("Hola")
-        print(box_w.shape)
-        print(box_h.shape)
+        #Se redimensiona la entrada para tener dimensiones (Batch_size,grid_size*grid_size*anchors,()
+        X = tf.reshape(X,[-1,self.grid_size*self.grid_size*self.num_anchors,self.final_conv_length])
+        #print("Nuevas dimensiones del tensor de entrada: [Batch_size,grid_size*grid_size*anchors, 5]",X.shape)
 
-        box_x = tf.sigmoid(box_x) + self.cx
-        box_y = tf.sigmoid(box_y) + self.cy
-        box_w = self.anchors[:,0]*tf.exp(box_w)
-        box_h = self.anchors[:,1]*tf.exp(box_h)
-        objectness = tf.sigmoid(objectness)
+        box_xy,box_wh,objectness,classes = tf.split(X, [2,2,1,self.num_classes], axis=-1)
+        print("Tensor para cada grid con las coordenadas de x e y",box_xy.shape)
+        print("Tensor para cada grid con las coordendas de w y h",box_wh.shape)
+        print("Tensor de offset en función de la posición de la imagen de cada grid unit", self.x_y_offset.shape)
+        print("")
+        box_xy = tf.sigmoid(box_xy)
+        box_xy = (box_xy + self.x_y_offset)*self.strides #Se encontra la coordenada (x,y) global del bouding box
+        box_wh = tf.exp(box_wh) * self.anchors_matrix #Se encuenta el ancho (eje X) y alto (eje Y) para cada bouding box
+        objectness = tf.sigmoid(objectness) # Se encuentra la probabilidad de cada bouding box de que sea una persona
+        print(box_xy.shape)
+        print(box_wh.shape)
+        print(objectness.shape)
 
-        return (box_x,box_y,box_w,box_h,objectness)
 
-#tf.keras.backend.clear_session()
+        return (box_xy, box_wh,objectness)
+
 
 class TinyYOLOv3(Model):
 
@@ -138,14 +174,14 @@ class TinyYOLOv3(Model):
         self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False)
         self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False)
         self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False)
-        self.block10 = BasicBlock(num_filters = 10, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
+        self.block10 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
         self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False)
         self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False)
-        self.block13 = BasicBlock(num_filters = 10, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
+        self.block13 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
         self.concat_block = Concatenate(axis=-1)
         self.upsamp = UpSampling2D(size = 2,interpolation = "nearest")
-        self.yolo1 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=13)
-        self.yolo2 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=26)
+        self.yolo1 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=13,num_classes=num_classes)
+        self.yolo2 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=26,num_classes=num_classes)
 
     def build(self,batch_input_shape):
         super().build(batch_input_shape)
@@ -167,33 +203,41 @@ class TinyYOLOv3(Model):
         yolo2 = self.concat_block([yolo2,root])
         yolo2 = self.block12(yolo2)
         yolo2 = self.block13(yolo2)
-        yolo1 = tf.reshape(yolo1,(-1,13,13,2,5))
-        yolo2 = tf.reshape(yolo2,(-1,26,26,2,5))
 
+
+        yolo1 = tf.reshape(yolo1,(-1,13,13,3,85))
+        yolo2 = tf.reshape(yolo2,(-1,26,26,3,85))
+        print(yolo1.shape)
+        print(yolo2.shape)
         output1 = self.yolo1(yolo1)
         output2 = self.yolo2(yolo2)
         return (output1,output2)
+        #return (yolo1,yolo2)
 
 
-a = TinyYOLOv3(num_classes = 1,bouding_boxes="prueba")
+
+
+
+
+
+
+
+
+a = TinyYOLOv3(num_classes = 80,bouding_boxes="prueba")
 
 #a.build_graph((32,10,))
 print(a.summary)
 
-sample_image = np.float32(np.random.random(size=(8,416,416,3)))
+sample_image = np.float32(np.random.random(size=(1,416,416,3)))
 #test = a(inputs = sample_image)
 
 a.build(batch_input_shape=(None,416,416,3))
 
-#@tf.function
-def prueba(x):
-	return a(x)
-
 import time
 
 tiempo= []
-for i in range(1000):
-	if i%100==0:
+for i in range(100):
+	if i%10==0:
 		print(i)
 	inicio = time.time()
 	aux1,aux2 = a(sample_image)
@@ -204,14 +248,23 @@ for i in range(1000):
 
 import numpy as np
 
+print(aux1.shape)
+print(aux2.shape)
+'''
 for i in aux1:
     print(i.shape)
 
+for i in aux2:
+    print(i.shape)
+'''
 #print(aux1.shape)
 #print(aux2.shape)
+print(np.array(tiempo).shape)
 print(np.median(tiempo))
 print(np.mean(tiempo))
-
+plt.plot(tiempo[1:])
+#plt.hist(tiempo[1:],bins = 50)
+plt.show()
 
 #prueba = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8]]),conf_thresh=0.5,grid_size=26)
 #prueba.build(batch_input_shape=(None,26,26,2,5))

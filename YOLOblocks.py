@@ -47,8 +47,9 @@ class BasicBlock(Layer):
                  activation= LeakyReLU,
                  batch_norm=True,
                  root=False,
+                 name = None,
                  **kwargs):
-        super(BasicBlock,self).__init__()
+        super(BasicBlock,self).__init__(name=name,**kwargs)
         self.num_filters = num_filters
         self.kernel_size = kernel_size
         self.batch_norm = batch_norm
@@ -219,21 +220,21 @@ class TinyConvnet(Model):
     def __init__(self,num_classes,bouding_boxes,**kwargs):
         super(TinyConvnet,self).__init__()
 
-        self.block1 = BasicBlock(num_filters = 16, kernel_size = 3)
-        self.block2 = BasicBlock(num_filters = 32, kernel_size = 3)
-        self.block3 = BasicBlock(num_filters = 64, kernel_size = 3)
-        self.block4 = BasicBlock(num_filters = 128, kernel_size = 3)
-        self.block5 = BasicBlock(num_filters = 256, kernel_size = 3, root = True)
-        self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1)
-        self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False)
-        self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False)
-        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False)
-        self.block10 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
-        self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False)
-        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False)
-        self.block13 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
-        self.concat_block = Concatenate(axis=-1)
-        self.upsamp = UpSampling2D(size = 2,interpolation = "nearest")
+        self.block1 = BasicBlock(num_filters = 16, kernel_size = 3,name="BasicBlock1")
+        self.block2 = BasicBlock(num_filters = 32, kernel_size = 3,name="BasicBlock2")
+        self.block3 = BasicBlock(num_filters = 64, kernel_size = 3,name="BasicBlock3")
+        self.block4 = BasicBlock(num_filters = 128, kernel_size = 3,name="BasicBlock4")
+        self.block5 = BasicBlock(num_filters = 256, kernel_size = 3, root = True,name="BasicBlock5")
+        self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1,name="BasicBlock6")
+        self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False,name="BasicBlock7")
+        self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False,name="BasicBlock8")
+        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False,name="BasicBlock9")
+        self.block10 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock1")
+        self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False,name="BasicBlock11")
+        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False,name="BasicBlock12")
+        self.block13 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock2")
+        self.concat_block = Concatenate(axis=-1,name="Concatenate")
+        self.upsamp = UpSampling2D(size = 2,interpolation = "nearest",name="Upsampling")
     def build(self,batch_input_shape):
         super().build(batch_input_shape)
     @tf.function
@@ -256,6 +257,59 @@ class TinyConvnet(Model):
         yolo2 = self.block13(yolo2)
         
         return yolo1,yolo2    
+
+    def load_weights(self,weights_file):
+        fp = open(weights_file, "rb")
+        header = np.fromfile(fp, dtype=np.int32, count=5)  # First five are header values
+        #header_info = header
+        #seen = header[3] #Número de imágenes totales para el entrenamiento
+        #weights = np.fromfile(fp, dtype=np.float32)  # The rest are weights
+        #fp.close()
+        for layer in self.layers:
+            #Se obtiene una lista de np arrays, el orden en Tensorflow es: 
+            #SI la capa tiene BN el orden es: COnv weights,gamma(bn coef), beta(bn bias), moving mean, moving variance (mv*input + mm)
+            #Si la capa no tiene BN el orden es : Conv bias,Conv weights.
+            layer_weights = layer.get_weights()
+
+            #Tiene batch normalization
+            if len(layer_weights)==5:
+                num_filters = layer_weights[0].shape[-1]
+                size = layer_weights[0].shape[0]
+                in_dim = layer_weights[0].shape[2]
+                #Darknet order : [beta,gamma,mean,variance]
+                bn_weights = np.fromfile(fp,dtype=np.float32,count =4*num_filters)
+                print(bn_weights.shape)
+                #Tensorflow order: [gamma, beta,mean,variance]
+                bn_weights = bn_weights.reshape((4,num_filters))[[1,0,2,3]]
+                print(bn_weights.shape)
+
+
+            elif len(layer_weights)==2:
+                num_filters = layer_weights[0].shape[-1]
+                size = layer_weights[0].shape[0]
+                in_dim =layer_weights[0].shape[2]
+                
+                bias_weights = np.fromfile(fp,dtype=np.float32,count=num_filters)
+
+            #Darknet conv shape (out_dim,in_dim,height,width)
+
+            conv_shape=(num_filters,in_dim,size,size)
+
+            conv_weights = np.fromfile(fp,dtype= np.float32,count=np.int32(np.prod(conv_shape)))
+            print("CONV SHAPE",conv_shape)
+            #Tensorflow format (height, width, in_dim, out_dim)
+            conv_weights =conv_weights.reshape(np.int32(conv_shape)).transpose([2,3,1,0])
+
+            if len(layer_weights)==5:
+                gamma,beta,moving_mean,moving_variance = tf.split(bn_weights,[1,1,1,1],axis=0)
+                new_weights = [conv_weights,tf.reshape(gamma,[-1]),tf.reshape(beta,[-1]),tf.reshape(moving_mean,[-1]),tf.reshape(moving_variance,[-1])]
+                layer.set_weights(new_weights)
+
+            elif len(layer_weights)==2:
+                new_weights = [bias_weights,conv_weights]
+                layer.set_weights(new_weights)
+
+        fp.close()
 
 
 

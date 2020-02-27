@@ -12,7 +12,7 @@ from tensorflow.keras import Model
 
 import tensorflow as tf
 from tensorflow.compat.v1 import InteractiveSession
-#from tensorflow.compat.v1.image import non_max_suppression_v2
+from tensorflow.compat.v1.image import combined_non_max_suppression
 
 gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8) #Allocate more memory to Tensorflow
 #Arregla un bug donde marca un error con CUDA
@@ -107,8 +107,8 @@ class PredictionLayer(Layer):
     num_classes: Entero, número de clases a detectar, default 1
     '''
 
-    def __init__(self,anchor_boxes,grid_size,conf_thresh,num_classes):
-        super(PredictionLayer,self).__init__()
+    def __init__(self,anchor_boxes,grid_size,conf_thresh,num_classes,name=None,**kwargs):
+        super(PredictionLayer,self).__init__(name=name,**kwargs)
         self.num_anchors = len(anchor_boxes)
         self.num_classes = num_classes
 
@@ -135,57 +135,182 @@ class PredictionLayer(Layer):
 
         self.strides = 1./ self.grid_size
 
-
-        
-
     def call(self, X):
 
         #Se redimensiona la entrada para tener dimensiones (Batch_size,grid_size*grid_size*anchors,()
         X = tf.reshape(X,[-1,self.grid_size*self.grid_size*self.num_anchors,self.final_conv_length])
         #print("Nuevas dimensiones del tensor de entrada: [Batch_size,grid_size*grid_size*anchors, 5]",X.shape)
 
-        box_xy,box_wh,objectness,classes = tf.split(X, [2,2,1,self.num_classes], axis=-1)
-        print("Tensor para cada grid con las coordenadas de x e y",box_xy.shape)
-        print("Tensor para cada grid con las coordendas de w y h",box_wh.shape)
-        print("Tensor de offset en función de la posición de la imagen de cada grid unit", self.x_y_offset.shape)
-        print("")
+        if self.num_classes>1:
+            box_xy,box_wh,objectness,classes = tf.split(X, [2,2,1,self.num_classes], axis=-1)
+        else:
+            box_xy,box_wh,objectness = tf.split(X, [2,2,1], axis=-1)
+
+        #print("Tensor para cada grid con las coordenadas de x e y",box_xy.shape)
+        #print("Tensor para cada grid con las coordendas de w y h",box_wh.shape)
+        #print("Tensor de offset en función de la posición de la imagen de cada grid unit", self.x_y_offset.shape)
+        #print("")
         box_xy = tf.sigmoid(box_xy)
         box_xy = (box_xy + self.x_y_offset)*self.strides #Se encontra la coordenada (x,y) global del bouding box
         box_wh = tf.exp(box_wh) * self.anchors_matrix #Se encuenta el ancho (eje X) y alto (eje Y) para cada bouding box
         objectness = tf.sigmoid(objectness) # Se encuentra la probabilidad de cada bouding box de que sea una persona
-        print(box_xy.shape)
-        print(box_wh.shape)
-        print(objectness.shape)
+        #print(box_xy.shape)
+        #print(box_wh.shape)
+        #print(objectness.shape)
+
+        output = tf.concat([box_xy,box_wh,objectness],axis=-1)
 
 
-        return (box_xy, box_wh,objectness)
+        return output
+
+
+class NMSLayer(Layer):
+
+    def __init__(self, name=None,**kwargs):
+        super(NMSLayer,self).__init__(name=name,**kwargs)  
+
+    def call(self,inputs):
+        center_x,center_y,width,height,objectness = tf.split(inputs,[1,1,1,1,1],axis=-1)
+
+        top_left_x = center_x - width / 2
+        top_left_y = center_y - height / 2
+        bottom_right_x = center_x + width / 2
+        bottom_right_y = center_y + height / 2
+        boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)
+        output = combined_non_max_suppression(boxes,objectness,max_output_size=10)
+
+        return output
+
+
+
+
 
 
 class TinyYOLOv3(Model):
 
-    def __init__(self,num_classes,bouding_boxes,**kwargs):
+    def __init__(self,num_classes,anchor_boxes,**kwargs):
         super(TinyYOLOv3,self).__init__()
 
-        self.block1 = BasicBlock(num_filters = 16, kernel_size = 3)
-        self.block2 = BasicBlock(num_filters = 32, kernel_size = 3)
-        self.block3 = BasicBlock(num_filters = 64, kernel_size = 3)
-        self.block4 = BasicBlock(num_filters = 128, kernel_size = 3)
-        self.block5 = BasicBlock(num_filters = 256, kernel_size = 3, root = True)
-        self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1)
-        self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False)
-        self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False)
-        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False)
-        self.block10 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
-        self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False)
-        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False)
-        self.block13 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None)
-        self.concat_block = Concatenate(axis=-1)
-        self.upsamp = UpSampling2D(size = 2,interpolation = "nearest")
-        self.yolo1 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=13,num_classes=num_classes)
-        self.yolo2 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=26,num_classes=num_classes)
+        self.num_classes=num_classes
+        self.num_anchors = len(anchor_boxes)
+        
+        if num_classes==1:
+            self.filter_prediction_layer =5*(len(anchor_boxes)//2)
+        else:
+            self.filter_prediction_layer=(5+num_classes)*(len(anchor_boxes)//2)
+
+        self.block1 = BasicBlock(num_filters = 16, kernel_size = 3,name="BasicBlock1")
+        self.block2 = BasicBlock(num_filters = 32, kernel_size = 3,name="BasicBlock2")
+        self.block3 = BasicBlock(num_filters = 64, kernel_size = 3,name="BasicBlock3")
+        self.block4 = BasicBlock(num_filters = 128, kernel_size = 3,name="BasicBlock4")
+        self.block5 = BasicBlock(num_filters = 256, kernel_size = 3, root = True,name="BasicBlock5")
+        self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1,name="BasicBlock6")
+        self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False,name="BasicBlock7")
+        self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False,name="BasicBlock8")
+        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False,name="BasicBlock9")
+        self.block10 = BasicBlock(num_filters = self.filter_prediction_layer, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock1")
+        self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False,name="BasicBlock11")
+        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False,name="BasicBlock12")
+        self.block13 = BasicBlock(num_filters = self.filter_prediction_layer, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock2")
+        self.concat_block = Concatenate(axis=-1,name="Concatenate")
+        self.upsamp = UpSampling2D(size = 2,interpolation = "nearest",name="Upsampling")
+        self.yolo1 = PredictionLayer(anchor_boxes[:len(anchor_boxes)//2],conf_thresh=0.5,grid_size=13,num_classes=num_classes,name="Prediction1")
+        self.yolo2 = PredictionLayer(anchor_boxes[:len(anchor_boxes)//2],conf_thresh=0.5,grid_size=26,num_classes=num_classes,name="Prediction2")
+        self.concat_bbox = Concatenate(axis=1,name="Concatenate_BBOX")
+        self.nms_layer = NMSLayer()
 
     def build(self,batch_input_shape):
         super().build(batch_input_shape)
+
+    def load_weights(self,weights_file): 
+
+        is_convolution=False
+        total_parametros = 0
+
+        fp = open(weights_file, "rb")
+
+        for layer in self.layers:
+            '''
+            layer es un objeto de la clase "Layer", con .get_weights() se obtiene una lista de np arrays. El orden en Tensorflow es: 
+            *Si la capa tiene BN el orden es: Conv weights,gamma(bn coef), beta(bn bias), moving mean, moving variance (mv*input + mm)
+            *Si la capa no tiene BN el orden es : Conv bias,Conv weights.
+            '''
+            print(layer.name)
+            layer_weights = layer.get_weights()
+            layer_parametros = 0 #Contamos el número total de parametros de se acargan
+            #Tiene batch normalization
+            if len(layer_weights)==5:
+                num_filters = layer_weights[0].shape[-1]#Obtenemos el número de filtros de la capa de Convolución
+                size = layer_weights[0].shape[0] #Tamaño del filtro
+                in_dim = layer_weights[0].shape[2] #Dimension del filtro, número de filtros de la capa anterior
+
+                #Con fromfile obtenemos los 4*num_filters float numbers perteneciencias a la capa de BatchNormalization
+                #Darknet order : [beta,gamma,mean,variance]
+                bn_weights = np.fromfile(fp,dtype=np.float32,count =4*num_filters)
+
+                #print("Pesos del batch normalization",bn_weights.shape)
+                #Npumero de parámetros cargados
+                layer_parametros += bn_weights.shape[0]
+                #print(bn_weights.shape)
+                #Ahora usando reshape obtenemos la dimesion correcta pero cambiamos el orden de las filas, debido a la configuracion de TF para la capa BN
+                #Tensorflow order: [gamma, beta,mean,variance]
+                bn_weights = bn_weights.reshape((4,num_filters))[[1,0,2,3]]
+                #print(bn_weights.shape)
+                #Se activa la bandera de que fue una capa con la operacion convolucion
+                is_convolution = True
+
+            #No tiene batch normalization
+            elif len(layer_weights)==2:
+                num_filters = layer_weights[0].shape[-1]#Obtenemos el número de filtros de la capa de Convolución
+                size = layer_weights[0].shape[0] #Tamaño del filtro
+                in_dim = layer_weights[0].shape[2] #Dimension del filtro, número de filtros de la capa anterior
+
+                #Con fromfile obtenemos num_filters float numbers, que es número de bias que hay en ese capa
+                bias_weights = np.fromfile(fp,dtype=np.float32,count=num_filters)
+                #print("Bias de la convolucion",bias_weights.shape)
+                #Número de parametros cargados
+                layer_parametros += bias_weights.shape[0]
+                #Se activa la bandera de que fue una capa con la operacion convolucion
+                is_convolution=True
+            
+            #Si la capa analizada tenia una operación de convolucion, cargaremos los pesos correspondientes
+            if is_convolution:
+                #Se obtienen las dimensiones del tensor correspondiente a los pesos de la operación de COnvolución
+                #Darknet conv shape (out_dim,in_dim,height,width)
+                conv_shape=(num_filters,in_dim,size,size)
+                
+                #con frofile se obtienen num_filters*in_dim*size*size float numbers
+                conv_weights = np.fromfile(fp,dtype= np.float32,count=np.int32(np.prod(conv_shape)))
+                print("Pesos de la conlvulucion",conv_weights.shape)
+                print("CONV SHAPE",conv_shape)
+                #Se suman todod estos parametros al número de parametros cargados
+                layer_parametros += np.prod(conv_shape)
+                #print("Total de parametros",total_parametros)
+                #Se obtiene las dimesiones y el ORDEN correcto en el formato de tensorflow para almacenar los pesos
+                #Tensorflow format (height, width, in_dim, out_dim)
+                conv_weights =conv_weights.reshape(np.int32(conv_shape)).transpose([2,3,1,0])
+
+                #Finalmente se cargan los pesos al objeto layer usando el método set_weights
+                if len(layer_weights)==5:
+                    gamma,beta,moving_mean,moving_variance = tf.split(bn_weights,[1,1,1,1],axis=0)
+                    new_weights = [conv_weights,tf.reshape(gamma,[-1]),tf.reshape(beta,[-1]),tf.reshape(moving_mean,[-1]),tf.reshape(moving_variance,[-1])]
+                    layer.set_weights(new_weights)
+
+                elif len(layer_weights)==2:
+
+                    if self.num_classes==80:
+                        new_weights = [conv_weights,bias_weights]
+                        layer.set_weights(new_weights)
+                #Se regresa la bandera a su valor Falso
+                is_convolution=False
+            #Se acumula el número de pesos cargados.
+            total_parametros += layer_parametros
+
+
+        fp.close()
+    
+        return total_parametros
+
     @tf.function
     def call(self,inputs):
 
@@ -206,14 +331,23 @@ class TinyYOLOv3(Model):
         yolo2 = self.block13(yolo2)
 
 
-        yolo1 = tf.reshape(yolo1,(-1,13,13,3,85))
-        yolo2 = tf.reshape(yolo2,(-1,26,26,3,85))
-        print(yolo1.shape)
-        print(yolo2.shape)
+        yolo1 = tf.reshape(yolo1,(-1,13,13,self.num_anchors//2,self.filter_prediction_layer//(self.num_anchors//2)))
+        yolo2 = tf.reshape(yolo2,(-1,26,26,self.num_anchors//2,self.filter_prediction_layer//(self.num_anchors//2)))
+        #print(yolo1.shape)
+        #print(yolo2.shape)
         output1 = self.yolo1(yolo1)
-        output2 = self.yolo2(yolo2)
-        return (output1,output2)
+        output2 = self.yolo2(yolo2) 
+        #print(output1.shape)
+        #print(output2.shape) 
+        final_output = self.concat_bbox([output1,output2]) 
+        final_output = self.nms_layer(final_output) 
+        print(final_output.shape)
+        #bboxes1  
+        return final_output
+        #return (output1,output2)
         #return (yolo1,yolo2)
+
+    
 
 
 class TinyConvnet(Model):
@@ -258,9 +392,11 @@ class TinyConvnet(Model):
         
         return yolo1,yolo2    
 
-    def load_weights(self,weights_file):
+    def load_weights(self,weights_file): 
+        is_convolution=False
         fp = open(weights_file, "rb")
         header = np.fromfile(fp, dtype=np.int32, count=5)  # First five are header values
+        total_parametros = 0
         #header_info = header
         #seen = header[3] #Número de imágenes totales para el entrenamiento
         #weights = np.fromfile(fp, dtype=np.float32)  # The rest are weights
@@ -269,8 +405,9 @@ class TinyConvnet(Model):
             #Se obtiene una lista de np arrays, el orden en Tensorflow es: 
             #SI la capa tiene BN el orden es: COnv weights,gamma(bn coef), beta(bn bias), moving mean, moving variance (mv*input + mm)
             #Si la capa no tiene BN el orden es : Conv bias,Conv weights.
+            print(layer.name)
             layer_weights = layer.get_weights()
-
+            layer_parametros = 0
             #Tiene batch normalization
             if len(layer_weights)==5:
                 num_filters = layer_weights[0].shape[-1]
@@ -278,10 +415,13 @@ class TinyConvnet(Model):
                 in_dim = layer_weights[0].shape[2]
                 #Darknet order : [beta,gamma,mean,variance]
                 bn_weights = np.fromfile(fp,dtype=np.float32,count =4*num_filters)
-                print(bn_weights.shape)
+                #print("Pesos del batch normalization",bn_weights.shape)
+                layer_parametros += bn_weights.shape[0]
+                #print(bn_weights.shape)
                 #Tensorflow order: [gamma, beta,mean,variance]
                 bn_weights = bn_weights.reshape((4,num_filters))[[1,0,2,3]]
-                print(bn_weights.shape)
+                #print(bn_weights.shape)
+                is_convolution = True
 
 
             elif len(layer_weights)==2:
@@ -290,26 +430,86 @@ class TinyConvnet(Model):
                 in_dim =layer_weights[0].shape[2]
                 
                 bias_weights = np.fromfile(fp,dtype=np.float32,count=num_filters)
+                print("Bias de la convolucion",bias_weights.shape)
+                layer_parametros += bias_weights.shape[0]
+                is_convolution=True
+            
+            if is_convolution:
+                #Darknet conv shape (out_dim,in_dim,height,width)
+                conv_shape=(num_filters,in_dim,size,size)
 
-            #Darknet conv shape (out_dim,in_dim,height,width)
+                conv_weights = np.fromfile(fp,dtype= np.float32,count=np.int32(np.prod(conv_shape)))
+                print("Pesos de la conlvulucion",conv_weights.shape)
+                print("CONV SHAPE",conv_shape)
+                layer_parametros += np.prod(conv_shape)
+                #print("Total de parametros",total_parametros)
+                #Tensorflow format (height, width, in_dim, out_dim)
+                conv_weights =conv_weights.reshape(np.int32(conv_shape)).transpose([2,3,1,0])
 
-            conv_shape=(num_filters,in_dim,size,size)
+                if len(layer_weights)==5:
+                    gamma,beta,moving_mean,moving_variance = tf.split(bn_weights,[1,1,1,1],axis=0)
+                    new_weights = [conv_weights,tf.reshape(gamma,[-1]),tf.reshape(beta,[-1]),tf.reshape(moving_mean,[-1]),tf.reshape(moving_variance,[-1])]
+                    layer.set_weights(new_weights)
 
-            conv_weights = np.fromfile(fp,dtype= np.float32,count=np.int32(np.prod(conv_shape)))
-            print("CONV SHAPE",conv_shape)
-            #Tensorflow format (height, width, in_dim, out_dim)
-            conv_weights =conv_weights.reshape(np.int32(conv_shape)).transpose([2,3,1,0])
+                elif len(layer_weights)==2:
+                    new_weights = [conv_weights,bias_weights]
+                    layer.set_weights(new_weights)
+                
+                is_convolution=False
 
-            if len(layer_weights)==5:
-                gamma,beta,moving_mean,moving_variance = tf.split(bn_weights,[1,1,1,1],axis=0)
-                new_weights = [conv_weights,tf.reshape(gamma,[-1]),tf.reshape(beta,[-1]),tf.reshape(moving_mean,[-1]),tf.reshape(moving_variance,[-1])]
-                layer.set_weights(new_weights)
-
-            elif len(layer_weights)==2:
-                new_weights = [bias_weights,conv_weights]
-                layer.set_weights(new_weights)
+            total_parametros += layer_parametros
 
         fp.close()
+    
+        return total_parametros
+
+
+
+'''
+class TinyYOLO(Model):
+    def __init__(self,num_classes,bouding_boxes,**kwargs):
+        super(TinyYOLO,self).__init__()
+
+        self.convnet = TinyConvnet(80,None)
+        self.convnet.load_weights("yolov3-tiny.weights")
+        self.yolo1 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=13,num_classes=num_classes)
+        self.yolo2 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=26,num_classes=num_classes)
+    
+    def build(self,batch_input_shape):
+        super().build(batch_input_shape)
+    
+    def call(self,inputs):
+
+        yolo1,yolo2 = self.convnet(inputs)
+        yolo1 = tf.reshape(yolo1,(-1,13,13,3,85))
+        yolo2 = tf.reshape(yolo2,(-1,26,26,3,85))
+        print(yolo1.shape)
+        print(yolo2.shape)
+        output1 = self.yolo1(yolo1)
+        output2 = self.yolo2(yolo2)
+
+        return output1,output2
+
+'''
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

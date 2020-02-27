@@ -6,27 +6,42 @@ Created on TUe Feb 25 16:11:36 2020
 @author: sergio
 """
 
-from YOLOblocks import TinyConvnet,ReadModelConfig
+from YOLOblocks import TinyYOLOv3,ReadModelConfig
 import numpy as np
 
-fp = open("yolov3-tiny.weights", "rb")
-header = np.fromfile(fp, dtype=np.int32, count=5)  # First five are header values
-header_info = header
-seen = header[3] #Número de imágenes totales para el entrenamiento
-weights = np.fromfile(fp, dtype=np.float32)  # The rest are weights
-fp.close()
 
 
+mod = TinyYOLOv3(1,anchor_boxes=[[0.2,0.5],[0.3,0.8],[0.4,0.4],[0.2,0.5],[0.4,0.4],[0.2,0.5]])
+mod.build(batch_input_shape=(None,416,416,3))
+mod.summary()
+print(mod.load_weights("yolov3-tiny.weights"))
 
+sample_image = np.random.random((1,416,416,3))
+
+import time
+
+tiempo= []
+for i in range(1000):
+	if i%100==0:
+		print(i)
+	inicio = time.time()
+	_ = mod(sample_image)
+	fin = time.time()
+
+	tiempo.append(fin-inicio)
+
+print(np.median(tiempo))
+print(1./np.median(tiempo))
+print(np.mean(tiempo))
+
+'''
 b = TinyConvnet(80,None)
 b.build(batch_input_shape=(None,416,416,3))
 print(b.summary())
 print(weights.shape)
-b.load_weights("yolov3-tiny.weights")
-
-
-
-'''
+total_param = b.load_weights("yolov3-tiny.weights")
+print(total_param)
+ 
 
 names = [weight.name for layer in b.layers for weight in layer.weights]
 weights = b.get_weights()

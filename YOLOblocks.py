@@ -12,7 +12,7 @@ from tensorflow.keras import Model
 
 import tensorflow as tf
 from tensorflow.compat.v1 import InteractiveSession
-from tensorflow.compat.v1.image import combined_non_max_suppression
+from tensorflow.compat.v1.image import non_max_suppression
 
 gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8) #Allocate more memory to Tensorflow
 #Arregla un bug donde marca un error con CUDA
@@ -154,34 +154,74 @@ class PredictionLayer(Layer):
         box_xy = (box_xy + self.x_y_offset)*self.strides #Se encontra la coordenada (x,y) global del bouding box
         box_wh = tf.exp(box_wh) * self.anchors_matrix #Se encuenta el ancho (eje X) y alto (eje Y) para cada bouding box
         objectness = tf.sigmoid(objectness) # Se encuentra la probabilidad de cada bouding box de que sea una persona
+
+        if self.num_classes>1:
+            classes = tf.nn.sigmoid(classes)
+        else:
+            pass
+
+
         #print(box_xy.shape)
         #print(box_wh.shape)
         #print(objectness.shape)
-
+        '''
         output = tf.concat([box_xy,box_wh,objectness],axis=-1)
-
-
+        '''
+        if self.num_classes==1:
+            output = tf.concat([box_xy,box_wh,objectness],axis=-1)
+        else:
+            output = tf.concat([box_xy,box_wh,objectness,classes],axis=-1)
+        
         return output
 
 
 class NMSLayer(Layer):
+    '''
+    Clase de la capa NMS Layer. Esta capa obtiene las coordenadas de los bouding box esquina superior izquierda y la esquina inferior derecha.
+    También aplica el algoritmo de Non Max Supression sobre todos los bouding boxes
+    Argumentos:
+    num_classes: Entero, número de clases a detectar, default 1
+    '''
 
-    def __init__(self, name=None,**kwargs):
+    def __init__(self,num_classes=1,iou_thresh=0.5,max_output_size=10, name=None,**kwargs):
         super(NMSLayer,self).__init__(name=name,**kwargs)  
+        self.num_classes = num_classes
+        self.iou_thresh = iou_thresh
+        self.max_output_size = max_output_size
 
     def call(self,inputs):
-        center_x,center_y,width,height,objectness = tf.split(inputs,[1,1,1,1,1],axis=-1)
+
+        if self.num_classes==1:
+            center_x,center_y,width,height,objectness = tf.split(inputs,[1,1,1,1,1],axis=-1)
+        else: 
+            center_x,center_y,width,height,objectness,classes = tf.split(inputs,[1,1,1,1,1,self.num_classes],axis=-1)
+
+        #print("EL tamaño de clases es",classes.shape)
 
         top_left_x = center_x - width / 2
         top_left_y = center_y - height / 2
         bottom_right_x = center_x + width / 2
         bottom_right_y = center_y + height / 2
-        boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)
-        output = combined_non_max_suppression(boxes,objectness,max_output_size=10)
+        boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)#[:,:,tf.newaxis,:]
+        #print(boxes.shape)
 
-        return output
+        aux = tf.zeros(tf.shape(boxes)[1:])
+        aux_scores = tf.zeros(tf.shape(2535))
+        #output = 0
 
+        aux = boxes[0,:,:]#.reshape([boxes.shape[1],boxes[2].shape])
+        aux_scores = objectness[0,:]
+        output = non_max_suppression(aux,tf.squeeze(aux_scores) ,max_output_size=10)
 
+        for i in range(1,tf.shape(boxes)[0]):
+            aux = boxes[i,:,:]#.reshape([boxes.shape[1],boxes[2].shape])
+            aux_scores = objectness[i,:]
+            output = non_max_suppression(aux,tf.squeeze(aux_scores) ,max_output_size=10)
+
+        #output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=10,max_total_size=10)
+
+        #return output
+        return boxes
 
 
 
@@ -217,7 +257,7 @@ class TinyYOLOv3(Model):
         self.yolo1 = PredictionLayer(anchor_boxes[:len(anchor_boxes)//2],conf_thresh=0.5,grid_size=13,num_classes=num_classes,name="Prediction1")
         self.yolo2 = PredictionLayer(anchor_boxes[:len(anchor_boxes)//2],conf_thresh=0.5,grid_size=26,num_classes=num_classes,name="Prediction2")
         self.concat_bbox = Concatenate(axis=1,name="Concatenate_BBOX")
-        self.nms_layer = NMSLayer()
+        self.nms_layer = NMSLayer(num_classes=self.num_classes)
 
     def build(self,batch_input_shape):
         super().build(batch_input_shape)
@@ -235,7 +275,7 @@ class TinyYOLOv3(Model):
             *Si la capa tiene BN el orden es: Conv weights,gamma(bn coef), beta(bn bias), moving mean, moving variance (mv*input + mm)
             *Si la capa no tiene BN el orden es : Conv bias,Conv weights.
             '''
-            print(layer.name)
+            #print(layer.name)
             layer_weights = layer.get_weights()
             layer_parametros = 0 #Contamos el número total de parametros de se acargan
             #Tiene batch normalization
@@ -339,9 +379,10 @@ class TinyYOLOv3(Model):
         output2 = self.yolo2(yolo2) 
         #print(output1.shape)
         #print(output2.shape) 
-        final_output = self.concat_bbox([output1,output2]) 
-        final_output = self.nms_layer(final_output) 
-        print(final_output.shape)
+        output = self.concat_bbox([output1,output2]) 
+        #print(output.shape)
+        final_output = self.nms_layer(output) 
+        
         #bboxes1  
         return final_output
         #return (output1,output2)

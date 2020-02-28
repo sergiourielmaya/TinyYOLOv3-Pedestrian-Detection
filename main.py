@@ -8,10 +8,11 @@ Created on TUe Feb 25 16:11:36 2020
 
 from YOLOblocks import TinyYOLOv3,ReadModelConfig
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 
-mod = TinyYOLOv3(1,anchor_boxes=[[0.2,0.5],[0.3,0.8],[0.4,0.4],[0.2,0.5],[0.4,0.4],[0.2,0.5]])
+mod = TinyYOLOv3(80,anchor_boxes=[[0.2,0.5],[0.3,0.8],[0.4,0.4],[0.2,0.5]])
 mod.build(batch_input_shape=(None,416,416,3))
 mod.summary()
 print(mod.load_weights("yolov3-tiny.weights"))
@@ -25,7 +26,7 @@ for i in range(1000):
 	if i%100==0:
 		print(i)
 	inicio = time.time()
-	_ = mod(sample_image)
+	_ = mod.evaluate(sample_image,batch_size=1)
 	fin = time.time()
 
 	tiempo.append(fin-inicio)
@@ -33,6 +34,11 @@ for i in range(1000):
 print(np.median(tiempo))
 print(1./np.median(tiempo))
 print(np.mean(tiempo))
+print(np.min(tiempo))
+
+plt.plot(tiempo[1:])
+#plt.hist(tiempo[1:],bins = 50)
+plt.show()
 
 '''
 b = TinyConvnet(80,None)

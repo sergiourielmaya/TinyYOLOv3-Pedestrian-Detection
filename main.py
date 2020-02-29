@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 
 
-mod = TinyYOLOv3(80,anchor_boxes=[[0.2,0.5],[0.3,0.8],[0.4,0.4],[0.2,0.5]])
+mod = TinyYOLOv3(1,anchor_boxes=[[0.2,0.5],[0.3,0.8],[0.4,0.4],[0.2,0.5]])
 mod.build(batch_input_shape=(None,416,416,3))
 mod.summary()
 print(mod.load_weights("yolov3-tiny.weights"))
@@ -26,7 +26,7 @@ for i in range(1000):
 	if i%100==0:
 		print(i)
 	inicio = time.time()
-	_ = mod.evaluate(sample_image,batch_size=1)
+	_ = mod(sample_image)
 	fin = time.time()
 
 	tiempo.append(fin-inicio)

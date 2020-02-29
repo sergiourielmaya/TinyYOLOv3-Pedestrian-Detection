@@ -12,7 +12,7 @@ from tensorflow.keras import Model
 
 import tensorflow as tf
 from tensorflow.compat.v1 import InteractiveSession
-from tensorflow.compat.v1.image import non_max_suppression
+from tensorflow.compat.v1.image import non_max_suppression_with_scores,combined_non_max_suppression
 
 gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8) #Allocate more memory to Tensorflow
 #Arregla un bug donde marca un error con CUDA
@@ -188,7 +188,7 @@ class NMSLayer(Layer):
         self.num_classes = num_classes
         self.iou_thresh = iou_thresh
         self.max_output_size = max_output_size
-
+    @tf.function
     def call(self,inputs):
 
         if self.num_classes==1:
@@ -202,6 +202,8 @@ class NMSLayer(Layer):
         top_left_y = center_y - height / 2
         bottom_right_x = center_x + width / 2
         bottom_right_y = center_y + height / 2
+        
+        '''
         boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)#[:,:,tf.newaxis,:]
         #print(boxes.shape)
 
@@ -211,17 +213,21 @@ class NMSLayer(Layer):
 
         aux = boxes[0,:,:]#.reshape([boxes.shape[1],boxes[2].shape])
         aux_scores = objectness[0,:]
-        output = non_max_suppression(aux,tf.squeeze(aux_scores) ,max_output_size=10)
+        output = non_max_suppression_with_scores(aux,tf.squeeze(aux_scores) ,max_output_size=10)
 
         for i in range(1,tf.shape(boxes)[0]):
             aux = boxes[i,:,:]#.reshape([boxes.shape[1],boxes[2].shape])
             aux_scores = objectness[i,:]
-            output = non_max_suppression(aux,tf.squeeze(aux_scores) ,max_output_size=10)
+            output = non_max_suppression_with_scores(aux,tf.squeeze(aux_scores) ,max_output_size=10)
 
         #output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=10,max_total_size=10)
 
         #return output
-        return boxes
+        '''
+        boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
+        output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=100,max_total_size=100,iou_threshold=0.2)
+        
+        return output
 
 
 

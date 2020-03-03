@@ -24,7 +24,7 @@ session = InteractiveSession(config=config)
 from tensorflow.keras.layers import Conv2D,BatchNormalization,ZeroPadding2D,MaxPool2D, LeakyReLU,UpSampling2D,Concatenate
 import numpy as np
 import matplotlib.pyplot as plt
-
+import time
 
 
 class BasicBlock(Layer):
@@ -225,7 +225,8 @@ class NMSLayer(Layer):
         #return output
         '''
         boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
-        output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=100,max_total_size=100,iou_threshold=0.2)
+
+        output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=10,max_total_size=10,iou_threshold=0.8)
         
         return output
 
@@ -357,9 +358,10 @@ class TinyYOLOv3(Model):
     
         return total_parametros
 
-    @tf.function
+    @tf.function(input_signature=[tf.TensorSpec(shape=(None,416,416,3), dtype=tf.float32)])
     def call(self,inputs):
 
+        inicio = time.time()
         yolo1 = self.block1(inputs)
         yolo1 = self.block2(yolo1)
         yolo1 = self.block3(yolo1)
@@ -375,20 +377,27 @@ class TinyYOLOv3(Model):
         yolo2 = self.concat_block([yolo2,root])
         yolo2 = self.block12(yolo2)
         yolo2 = self.block13(yolo2)
+        fin=time.time()
+        print("Tiempo de la CNN",fin-inicio)
 
-
+        inicio = time.time()
         yolo1 = tf.reshape(yolo1,(-1,13,13,self.num_anchors//2,self.filter_prediction_layer//(self.num_anchors//2)))
         yolo2 = tf.reshape(yolo2,(-1,26,26,self.num_anchors//2,self.filter_prediction_layer//(self.num_anchors//2)))
         #print(yolo1.shape)
         #print(yolo2.shape)
+        
         output1 = self.yolo1(yolo1)
         output2 = self.yolo2(yolo2) 
         #print(output1.shape)
         #print(output2.shape) 
         output = self.concat_bbox([output1,output2]) 
+        fin= time.time()
+        print("Tiempo de la Capa YOLO: ",fin-inicio)
         #print(output.shape)
+        inicio=time.time()
         final_output = self.nms_layer(output) 
-        
+        fin = time.time()
+        print("Tiempo NMS: ",fin-inicio)
         #bboxes1  
         return final_output
         #return (output1,output2)

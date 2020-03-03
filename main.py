@@ -6,13 +6,23 @@ Created on TUe Feb 25 16:11:36 2020
 @author: sergio
 """
 
+import cv2
+
+img = cv2.imread("dog.jpg")
+print(img)
+cv2.imshow("image",img)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+
 from YOLOblocks import TinyYOLOv3,ReadModelConfig
 import numpy as np
 import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow.python.tools import freeze_graph
 
+anchors =[[10/416,14/416],[23/416,27/416],[37/416,58/416],[81/416,82/416],[135/416,169/416],[344/416,319/416]]
 
-
-mod = TinyYOLOv3(1,anchor_boxes=[[0.2,0.5],[0.3,0.8],[0.4,0.4],[0.2,0.5]])
+mod = TinyYOLOv3(80,anchor_boxes=anchors)
 mod.build(batch_input_shape=(None,416,416,3))
 mod.summary()
 print(mod.load_weights("yolov3-tiny.weights"))
@@ -22,8 +32,8 @@ sample_image = np.random.random((1,416,416,3))
 import time
 
 tiempo= []
-for i in range(1000):
-	if i%100==0:
+for i in range(100):
+	if i%1000==0:
 		print(i)
 	inicio = time.time()
 	_ = mod(sample_image)
@@ -31,16 +41,38 @@ for i in range(1000):
 
 	tiempo.append(fin-inicio)
 
+
+
 print(np.median(tiempo))
 print(1./np.median(tiempo))
 print(np.mean(tiempo))
 print(np.min(tiempo))
 
+inicio = time.time()
+_ = mod(sample_image)
+fin= time.time()
+print("TIEMPO FINAL",fin-inicio)
+
 plt.plot(tiempo[1:])
+plt.ylabel("Time (ms)")
+
 #plt.hist(tiempo[1:],bins = 50)
 plt.show()
 
 '''
+print("Procedemos a guardar el Modelo")
+tf.saved_model.save(mod,"saved_model")
+
+
+from tensorflow.python.compiler.tensorrt import trt_convert as trt
+conversion_params = trt.DEFAULT_TRT_CONVERSION_PARAMS
+conversion_params = conversion_params._replace(precision_mode="FP32")
+
+converter = trt.TrtGraphConverterV2(input_saved_model_dir="saved_model",conversion_params=conversion_params)
+converter.convert()
+converter.save("output_saved_model_dir")
+
+
 b = TinyConvnet(80,None)
 b.build(batch_input_shape=(None,416,416,3))
 print(b.summary())

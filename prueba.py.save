@@ -1,0 +1,30 @@
+import numpy as np
+import tensorflow as tf
+import time
+boxes = np.random.uniform(size=(3000, 4))
+scores = np.random.uniform(size=(3000,))
+
+bx = tf.constant(boxes, dtype=tf.float32)
+sc = tf.constant(scores, dtype=tf.float32)
+t = []
+
+for i in range(1000):
+	with tf.device("gpu:0"):
+		inicio = time.time()
+		indx = tf.image.non_max_suppression(bx, sc, 1000)
+		fin = time.time()
+		t.append(fin-inicio)
+
+
+print("Tiempo promedio de ejecución en GPU",np.mean(t))
+print("Tiempo medio de ejecución en GPU",np.median(t))
+
+
+boxes = np.random.uniform(size=(100, 4))
+scores = np.random.uniform(size=(100,))
+
+bx = tf.constant(boxes, dtype=tf.float32)
+sc = tf.constant(scores, dtype=tf.float32)
+
+with tf.device("gpu:0"):
+    indx = tf.image.non_max_suppression(bx, sc, 1000)

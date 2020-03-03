@@ -2,8 +2,8 @@
 import numpy as np
 import tensorflow as tf
 import time
-boxes = np.random.uniform(size=(500, 4))
-scores = np.random.uniform(size=(500,))
+boxes = np.random.uniform(size=(50, 4))
+scores = np.random.uniform(size=(50,))
 
 bx = tf.constant(boxes, dtype=tf.float32)
 sc = tf.constant(scores, dtype=tf.float32)
@@ -35,3 +35,8 @@ print("")
 print("Tiempo promedio de ejecución en CPU",np.mean(t))
 print("Tiempo medio de ejecución en CPU",np.median(t))
 
+
+tf.debugging.set_log_device_placement(True)
+
+indx = tf.image.non_max_suppression(b,s,num)
+print(indx)

@@ -8,6 +8,7 @@ scores = np.random.uniform(size=(50,))
 bx = tf.constant(boxes, dtype=tf.float32)
 sc = tf.constant(scores, dtype=tf.float32)
 
+
 @tf.function
 def function(b,s,num):
         indx = tf.image.non_max_suppression(b,s,num)

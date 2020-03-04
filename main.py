@@ -6,19 +6,27 @@ Created on TUe Feb 25 16:11:36 2020
 @author: sergio
 """
 
-import cv2
 
-img = cv2.imread("dog.jpg")
-print(img)
-cv2.imshow("image",img)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+
+#cv2.imshow("image",img)
+#cv2.waitKey(0)
+#cv2.destroyAllWindows()
 
 from YOLOblocks import TinyYOLOv3,ReadModelConfig
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.python.tools import freeze_graph
+from skimage.io import imread,imshow
+from skimage.transform import resize 
+import time
+
+img = imread("dog.jpg")
+img = resize(img,(416,416))
+print(type(img))
+print(img.dtype)
+imshow(img)
+
 
 anchors =[[10/416,14/416],[23/416,27/416],[37/416,58/416],[81/416,82/416],[135/416,169/416],[344/416,319/416]]
 
@@ -27,7 +35,27 @@ mod.build(batch_input_shape=(None,416,416,3))
 mod.summary()
 print(mod.load_weights("yolov3-tiny.weights"))
 
+img = np.float32(img[np.newaxis,:,:,:])
+#print(img)
+
+tiempo=[]
+with tf.device("CPU:0"):
+    for i in range(1000):
+        inicio = time.time()
+        _ = mod(img)
+        fin = time.time()
+        tiempo.append(fin-inicio)
+        #print(fin-inicio)
+
+print("Tiempo medio: ",np.median(tiempo))
+print("FPS: ", 1./np.median(tiempo))
+print("Tiempo promedio: ",np.mean(tiempo))
+print("Tiempo mínimo: ",np.min(tiempo))
+'''
 sample_image = np.random.random((1,416,416,3))
+print(sample_image.dtype)
+
+
 
 import time
 
@@ -36,7 +64,7 @@ for i in range(100):
 	if i%1000==0:
 		print(i)
 	inicio = time.time()
-	_ = mod(sample_image)
+	salida = mod(img)
 	fin = time.time()
 
 	tiempo.append(fin-inicio)
@@ -59,7 +87,8 @@ plt.ylabel("Time (ms)")
 #plt.hist(tiempo[1:],bins = 50)
 plt.show()
 
-'''
+print(salida)
+
 print("Procedemos a guardar el Modelo")
 tf.saved_model.save(mod,"saved_model")
 
@@ -107,4 +136,5 @@ for layer in b.layers:
 
 #prueba = ReadModelConfig("yolov3-tiny.cfg")
 #print(prueba)
+
 '''

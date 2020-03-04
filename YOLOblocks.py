@@ -226,7 +226,7 @@ class NMSLayer(Layer):
         '''
         boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
 
-        output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=10,max_total_size=10,iou_threshold=0.8)
+        output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=100,max_total_size=100,iou_threshold=0.6,score_threshold=0.5)
         
         return output
 

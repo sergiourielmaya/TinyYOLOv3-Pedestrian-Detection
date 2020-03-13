@@ -44,7 +44,7 @@ class BasicBlock(Layer):
                  kernel_size=3,
                  max_pooling=True,
                  max_pool_stride=2,
-                 activation= LeakyReLU,
+                 activation= LeakyReLU(0.1),
                  batch_norm=True,
                  root=False,
                  name = None,
@@ -72,7 +72,7 @@ class BasicBlock(Layer):
         if self.max_pooling:
             self.max_pool = MaxPool2D(pool_size =(2,2), strides= (self.max_pool_stride,self.max_pool_stride))
 
-        self.act = LeakyReLU(0.1)
+        self.act = activation
     
     def call(self,X):
 
@@ -83,7 +83,8 @@ class BasicBlock(Layer):
         else:
             x_root = x
 
-        x = self.act(x_root)
+        if self.act != None:
+            x=x_root = self.act(x_root)
 
         if self.max_pool_stride ==1:
             x = self.fixed_padding(x)
@@ -226,7 +227,7 @@ class NMSLayer(Layer):
         '''
         boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
 
-        output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=100,max_total_size=100,iou_threshold=0.6,score_threshold=0.5)
+        output = combined_non_max_suppression(boxes,classes*objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.6,score_threshold=0.5)
         
         return output
 
@@ -264,7 +265,7 @@ class TinyYOLOv3(Model):
         self.yolo1 = PredictionLayer(anchor_boxes[:len(anchor_boxes)//2],conf_thresh=0.5,grid_size=13,num_classes=num_classes,name="Prediction1")
         self.yolo2 = PredictionLayer(anchor_boxes[:len(anchor_boxes)//2],conf_thresh=0.5,grid_size=26,num_classes=num_classes,name="Prediction2")
         self.concat_bbox = Concatenate(axis=1,name="Concatenate_BBOX")
-        self.nms_layer = NMSLayer(num_classes=self.num_classes)
+        #self.nms_layer = NMSLayer(num_classes=self.num_classes)
 
     def build(self,batch_input_shape):
         super().build(batch_input_shape)
@@ -275,6 +276,8 @@ class TinyYOLOv3(Model):
         total_parametros = 0
 
         fp = open(weights_file, "rb")
+        header = np.fromfile(fp,dtype=np.int32,count=5)
+
 
         for layer in self.layers:
             '''
@@ -394,12 +397,14 @@ class TinyYOLOv3(Model):
         fin= time.time()
         print("Tiempo de la Capa YOLO: ",fin-inicio)
         #print(output.shape)
-        inicio=time.time()
-        final_output = self.nms_layer(output) 
-        fin = time.time()
-        print("Tiempo NMS: ",fin-inicio)
+        return output
+
+        #inicio=time.time()
+        #final_output = self.nms_layer(output) 
+        #fin = time.time()
+        #print("Tiempo NMS: ",fin-inicio)
         #bboxes1  
-        return final_output
+        #return final_output
         #return (output1,output2)
         #return (yolo1,yolo2)
 

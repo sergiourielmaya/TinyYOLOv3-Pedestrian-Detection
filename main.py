@@ -24,9 +24,11 @@ img_raw = tf.image.decode_image(
 img = tf.expand_dims(img_raw, 0)
 img = tf.image.resize(img, (416, 416))/255
 
-anchors =[[10/416,14/416],[23/416,27/416],[37/416,58/416],[81/416,82/416],[135/416,169/416],[344/416,319/416]]
+#anchors =[[10/416,14/416],[23/416,27/416],[37/416,58/416],[81/416,82/416],[135/416,169/416],[344/416,319/416]]
+anchors =[[10/416,14/416],[23/416,27/416],[37/416,58/416],[81/416,82/416]]
 
-mod = TinyYOLOv3(80,anchor_boxes=anchors)
+mod = TinyYOLOv3(1,anchor_boxes=anchors)
+
 mod.build(batch_input_shape=(None,416,416,3))
 mod.summary()
 print(mod.load_weights("yolov3-tiny.weights"))

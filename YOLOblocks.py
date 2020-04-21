@@ -141,7 +141,7 @@ class PredictionLayer(Layer):
         #Se redimensiona la entrada para tener dimensiones (Batch_size,grid_size*grid_size*anchors,()
         X = tf.reshape(X,[-1,self.grid_size*self.grid_size*self.num_anchors,self.final_conv_length])
         #print("Nuevas dimensiones del tensor de entrada: [Batch_size,grid_size*grid_size*anchors, 5]",X.shape)
-
+        print("Se redimensiona la salida de la CNN a:",X.shape)
         if self.num_classes>1:
             box_xy,box_wh,objectness,classes = tf.split(X, [2,2,1,self.num_classes], axis=-1)
         else:
@@ -194,6 +194,7 @@ class NMSLayer(Layer):
 
         if self.num_classes==1:
             center_x,center_y,width,height,objectness = tf.split(inputs,[1,1,1,1,1],axis=-1)
+            print("Solo es una clase")
         else: 
             center_x,center_y,width,height,objectness,classes = tf.split(inputs,[1,1,1,1,1,self.num_classes],axis=-1)
 
@@ -226,9 +227,11 @@ class NMSLayer(Layer):
         #return output
         '''
         boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
-
-        output = combined_non_max_suppression(boxes,classes*objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.6,score_threshold=0.5)
-        
+        print(boxes.shape)
+        if self.num_classes >1:
+            output = combined_non_max_suppression(boxes,classes*objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.6,score_threshold=0.5)
+        else:
+            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.6,score_threshold=0.5)
         return output
 
 
@@ -362,7 +365,7 @@ class TinyYOLOv3(Model):
         return total_parametros
 
     @tf.function(input_signature=[tf.TensorSpec(shape=(None,416,416,3), dtype=tf.float32)])
-    def call(self,inputs):
+    def call(self,inputs,train=True):
 
         inicio = time.time()
         yolo1 = self.block1(inputs)
@@ -382,194 +385,36 @@ class TinyYOLOv3(Model):
         yolo2 = self.block13(yolo2)
         fin=time.time()
         print("Tiempo de la CNN",fin-inicio)
-
+        print("Salida de la CNN",yolo1.shape)
+        print("Salida de la CNN",yolo2.shape)
         inicio = time.time()
         yolo1 = tf.reshape(yolo1,(-1,13,13,self.num_anchors//2,self.filter_prediction_layer//(self.num_anchors//2)))
         yolo2 = tf.reshape(yolo2,(-1,26,26,self.num_anchors//2,self.filter_prediction_layer//(self.num_anchors//2)))
-        #print(yolo1.shape)
-        #print(yolo2.shape)
+        print("Reshape de la salida de la CNN",yolo1.shape)
+        print("Reshape de la salida de la CNN",yolo2.shape)
         
         output1 = self.yolo1(yolo1)
         output2 = self.yolo2(yolo2) 
-        #print(output1.shape)
-        #print(output2.shape) 
+        print("Salida de la capa YOLO",output1.shape)
+        print("Salida de la capa YOLO",output2.shape) 
         output = self.concat_bbox([output1,output2]) 
+        print(output.shape)
         fin= time.time()
         print("Tiempo de la Capa YOLO: ",fin-inicio)
         #print(output.shape)
-        return output
-
-        #inicio=time.time()
-        #final_output = self.nms_layer(output) 
-        #fin = time.time()
-        #print("Tiempo NMS: ",fin-inicio)
-        #bboxes1  
-        #return final_output
-        #return (output1,output2)
-        #return (yolo1,yolo2)
-
-    
-
-
-class TinyConvnet(Model):
-    def __init__(self,num_classes,bouding_boxes,**kwargs):
-        super(TinyConvnet,self).__init__()
-
-        self.block1 = BasicBlock(num_filters = 16, kernel_size = 3,name="BasicBlock1")
-        self.block2 = BasicBlock(num_filters = 32, kernel_size = 3,name="BasicBlock2")
-        self.block3 = BasicBlock(num_filters = 64, kernel_size = 3,name="BasicBlock3")
-        self.block4 = BasicBlock(num_filters = 128, kernel_size = 3,name="BasicBlock4")
-        self.block5 = BasicBlock(num_filters = 256, kernel_size = 3, root = True,name="BasicBlock5")
-        self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1,name="BasicBlock6")
-        self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False,name="BasicBlock7")
-        self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False,name="BasicBlock8")
-        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False,name="BasicBlock9")
-        self.block10 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock1")
-        self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False,name="BasicBlock11")
-        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False,name="BasicBlock12")
-        self.block13 = BasicBlock(num_filters = 255, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock2")
-        self.concat_block = Concatenate(axis=-1,name="Concatenate")
-        self.upsamp = UpSampling2D(size = 2,interpolation = "nearest",name="Upsampling")
-    def build(self,batch_input_shape):
-        super().build(batch_input_shape)
-    @tf.function
-    def call(self,inputs):
-
-        yolo1 = self.block1(inputs)
-        yolo1 = self.block2(yolo1)
-        yolo1 = self.block3(yolo1)
-        yolo1 = self.block4(yolo1)
-        yolo1,root = self.block5(yolo1)
-        yolo1 = self.block6(yolo1)
-        yolo1 = self.block7(yolo1)
-        yolo1_branch = self.block8(yolo1)
-        yolo1 = self.block9(yolo1_branch)
-        yolo1 = self.block10(yolo1)
-        yolo2 = self.block11(yolo1_branch)
-        yolo2 = self.upsamp(yolo2)
-        yolo2 = self.concat_block([yolo2,root])
-        yolo2 = self.block12(yolo2)
-        yolo2 = self.block13(yolo2)
         
-        return yolo1,yolo2    
+        if train:
+            return output
+        else:
+            inicio=time.time()
+            final_output = self.nms_layer(output) 
+            fin = time.time()
+            print("Tiempo NMS: ",fin-inicio)
+            #bboxes1  
+            return final_output
 
-    def load_weights(self,weights_file): 
-        is_convolution=False
-        fp = open(weights_file, "rb")
-        header = np.fromfile(fp, dtype=np.int32, count=5)  # First five are header values
-        total_parametros = 0
-        #header_info = header
-        #seen = header[3] #Número de imágenes totales para el entrenamiento
-        #weights = np.fromfile(fp, dtype=np.float32)  # The rest are weights
-        #fp.close()
-        for layer in self.layers:
-            #Se obtiene una lista de np arrays, el orden en Tensorflow es: 
-            #SI la capa tiene BN el orden es: COnv weights,gamma(bn coef), beta(bn bias), moving mean, moving variance (mv*input + mm)
-            #Si la capa no tiene BN el orden es : Conv bias,Conv weights.
-            print(layer.name)
-            layer_weights = layer.get_weights()
-            layer_parametros = 0
-            #Tiene batch normalization
-            if len(layer_weights)==5:
-                num_filters = layer_weights[0].shape[-1]
-                size = layer_weights[0].shape[0]
-                in_dim = layer_weights[0].shape[2]
-                #Darknet order : [beta,gamma,mean,variance]
-                bn_weights = np.fromfile(fp,dtype=np.float32,count =4*num_filters)
-                #print("Pesos del batch normalization",bn_weights.shape)
-                layer_parametros += bn_weights.shape[0]
-                #print(bn_weights.shape)
-                #Tensorflow order: [gamma, beta,mean,variance]
-                bn_weights = bn_weights.reshape((4,num_filters))[[1,0,2,3]]
-                #print(bn_weights.shape)
-                is_convolution = True
-
-
-            elif len(layer_weights)==2:
-                num_filters = layer_weights[0].shape[-1]
-                size = layer_weights[0].shape[0]
-                in_dim =layer_weights[0].shape[2]
-                
-                bias_weights = np.fromfile(fp,dtype=np.float32,count=num_filters)
-                print("Bias de la convolucion",bias_weights.shape)
-                layer_parametros += bias_weights.shape[0]
-                is_convolution=True
-            
-            if is_convolution:
-                #Darknet conv shape (out_dim,in_dim,height,width)
-                conv_shape=(num_filters,in_dim,size,size)
-
-                conv_weights = np.fromfile(fp,dtype= np.float32,count=np.int32(np.prod(conv_shape)))
-                print("Pesos de la conlvulucion",conv_weights.shape)
-                print("CONV SHAPE",conv_shape)
-                layer_parametros += np.prod(conv_shape)
-                #print("Total de parametros",total_parametros)
-                #Tensorflow format (height, width, in_dim, out_dim)
-                conv_weights =conv_weights.reshape(np.int32(conv_shape)).transpose([2,3,1,0])
-
-                if len(layer_weights)==5:
-                    gamma,beta,moving_mean,moving_variance = tf.split(bn_weights,[1,1,1,1],axis=0)
-                    new_weights = [conv_weights,tf.reshape(gamma,[-1]),tf.reshape(beta,[-1]),tf.reshape(moving_mean,[-1]),tf.reshape(moving_variance,[-1])]
-                    layer.set_weights(new_weights)
-
-                elif len(layer_weights)==2:
-                    new_weights = [conv_weights,bias_weights]
-                    layer.set_weights(new_weights)
-                
-                is_convolution=False
-
-            total_parametros += layer_parametros
-
-        fp.close()
-    
-        return total_parametros
-
-
-
-'''
-class TinyYOLO(Model):
-    def __init__(self,num_classes,bouding_boxes,**kwargs):
-        super(TinyYOLO,self).__init__()
-
-        self.convnet = TinyConvnet(80,None)
-        self.convnet.load_weights("yolov3-tiny.weights")
-        self.yolo1 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=13,num_classes=num_classes)
-        self.yolo2 = PredictionLayer(np.array([[0.2,0.5],[0.3,0.8],[0.4,0.4]]),conf_thresh=0.5,grid_size=26,num_classes=num_classes)
-    
-    def build(self,batch_input_shape):
-        super().build(batch_input_shape)
-    
-    def call(self,inputs):
-
-        yolo1,yolo2 = self.convnet(inputs)
-        yolo1 = tf.reshape(yolo1,(-1,13,13,3,85))
-        yolo2 = tf.reshape(yolo2,(-1,26,26,3,85))
-        print(yolo1.shape)
-        print(yolo2.shape)
-        output1 = self.yolo1(yolo1)
-        output2 = self.yolo2(yolo2)
-
-        return output1,output2
-
-'''
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    def loss_function(self,y_pred,y_true):
+        pass
 
 
 

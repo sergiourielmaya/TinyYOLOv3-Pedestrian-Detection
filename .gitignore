@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+#Mis carpetas
+Dataset Preprocessing/coco/
+
+#Archivos CVS
+.csv

@@ -8,6 +8,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+pedestrian_dataset_train/
 build/
 develop-eggs/
 dist/

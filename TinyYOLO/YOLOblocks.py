@@ -12,7 +12,8 @@ from tensorflow.keras import Model
 
 import tensorflow as tf
 from tensorflow.compat.v1 import InteractiveSession
-from tensorflow.compat.v1.image import non_max_suppression_with_scores,combined_non_max_suppression
+#from tensorflow.compat.v1.image import non_max_suppression_with_scores,combined_non_max_suppression
+from tensorflow.image import combined_non_max_suppression
 
 gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8) #Allocate more memory to Tensorflow
 #Arregla un bug donde marca un error con CUDA
@@ -229,9 +230,10 @@ class NMSLayer(Layer):
         boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
         print(boxes.shape)
         if self.num_classes >1:
-            output = combined_non_max_suppression(boxes,classes*objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.6,score_threshold=0.5)
+            #classes*
+            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=20,max_total_size=100,iou_threshold=0.4,score_threshold=0.5)
         else:
-            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.6,score_threshold=0.5)
+            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.4,score_threshold=0.5)
         return output
 
 

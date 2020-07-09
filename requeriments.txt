@@ -1,4 +1,4 @@
 scikit-image
 imgaug
 pandas
-jupyterlab
+pycocotools

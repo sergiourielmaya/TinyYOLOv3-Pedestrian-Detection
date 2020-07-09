@@ -13,7 +13,8 @@ from tensorflow.keras.losses import Loss,BinaryCrossentropy
 
 import tensorflow as tf
 from tensorflow.compat.v1 import InteractiveSession
-from tensorflow.compat.v1.image import non_max_suppression_with_scores,combined_non_max_suppression
+#from tensorflow.compat.v1.image import non_max_suppression_with_scores,combined_non_max_suppression
+from tensorflow.image import non_max_suppression_with_scores,combined_non_max_suppression
 #from tensorflow.image import non_max_suppression_v2
 
 gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8) #Allocate more memory to Tensorflow
@@ -288,8 +289,10 @@ class NMSLayer(Layer):
         #print(boxes.shape)
 
         if self.num_classes >1:
+            #
             boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
-            output = combined_non_max_suppression(boxes,classes*objectness,max_output_size_per_class=10,max_total_size=20,iou_threshold=0.6,score_threshold=0.5)
+            output = combined_non_max_suppression(boxes,classes*objectness,max_output_size_per_class=100,max_total_size=100,iou_threshold=0.6,score_threshold=0.5)
+            
             return output
         else:
             #boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y,objectness], axis=-1)
@@ -297,7 +300,7 @@ class NMSLayer(Layer):
             
             #output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=15,max_total_size=15,iou_threshold=0.6,score_threshold=0.3)
             boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)
-            selected_indices, selected_scores = non_max_suppression_with_scores(boxes[0,:,:],objectness[0,:,0],max_output_size=10,iou_threshold=0.6,score_threshold=0.5)#,soft_nms_sigma=0.5)
+            selected_indices, selected_scores = non_max_suppression_with_scores(boxes[0,:,:],objectness[0,:,0],max_output_size=20,iou_threshold=0.6,score_threshold=0.5)#,soft_nms_sigma=0.5)
             selected_boxes = tf.gather(boxes, selected_indices,axis=1)
             return selected_boxes,selected_scores
             #return boxes
@@ -327,10 +330,10 @@ class TinyYOLOv3(Model):
         self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1,name="BasicBlock6",trainable=entrenable,bn_train_state = self.train)
         self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False,name="BasicBlock7",trainable=entrenable,bn_train_state = self.train)
         self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False,name="BasicBlock8",trainable=entrenable,bn_train_state = self.train)
-        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False,name="BasicBlock9",trainable=entrenable,bn_train_state = self.train)
+        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False,name="BasicBlock9",trainable=True,bn_train_state = self.train)
         self.block10 = BasicBlock(num_filters = self.filter_prediction_layer, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock1")
         self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False,name="BasicBlock11",trainable=entrenable,bn_train_state = self.train)
-        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False,name="BasicBlock12",trainable=entrenable,bn_train_state = self.train)
+        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False,name="BasicBlock12",trainable=True,bn_train_state = self.train)
         self.block13 = BasicBlock(num_filters = self.filter_prediction_layer, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock2")
         self.concat_block = Concatenate(axis=-1,name="Concatenate")
         self.upsamp = UpSampling2D(size = 2,interpolation = "nearest",name="Upsampling")

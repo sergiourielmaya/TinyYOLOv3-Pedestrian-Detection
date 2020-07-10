@@ -252,7 +252,7 @@ class NMSLayer(Layer):
 
         if self.num_classes==1:
             center_x,center_y,width,height,objectness = tf.split(inputs,[1,1,1,1,1],axis=-1)
-            print("Solo es una clase")
+            #print("Solo es una clase")
         else: 
             center_x,center_y,width,height,objectness,classes = tf.split(inputs,[1,1,1,1,1,self.num_classes],axis=-1)
 
@@ -262,28 +262,6 @@ class NMSLayer(Layer):
         top_left_y = center_y - (height / 2)
         bottom_right_x = center_x + (width / 2)
         bottom_right_y = center_y + (height / 2)
-        
-        '''
-        boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)#[:,:,tf.newaxis,:]
-        #print(boxes.shape)
-
-        aux = tf.zeros(tf.shape(boxes)[1:])
-        aux_scores = tf.zeros(tf.shape(2535))
-        #output = 0
-
-        aux = boxes[0,:,:]#.reshape([boxes.shape[1],boxes[2].shape])
-        aux_scores = objectness[0,:]
-        output = non_max_suppression_with_scores(aux,tf.squeeze(aux_scores) ,max_output_size=10)
-
-        for i in range(1,tf.shape(boxes)[0]):
-            aux = boxes[i,:,:]#.reshape([boxes.shape[1],boxes[2].shape])
-            aux_scores = objectness[i,:]
-            output = non_max_suppression_with_scores(aux,tf.squeeze(aux_scores) ,max_output_size=10)
-
-        #output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=10,max_total_size=10)
-
-        #return output
-        '''
         
         #boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
         #print(boxes.shape)
@@ -297,13 +275,27 @@ class NMSLayer(Layer):
         else:
             #boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y,objectness], axis=-1)
             #
+            boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
+            #return tf.gather(boxes,tf.where(objectness[0,:,0]>0.5),axis=(1))[0,:,0,0,:]
+
+            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=15,max_total_size=15,iou_threshold=0.6,score_threshold=0.5)
+            return output[0][0,:output[3][0],:]
             
-            #output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=15,max_total_size=15,iou_threshold=0.6,score_threshold=0.3)
-            boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)
-            selected_indices, selected_scores = non_max_suppression_with_scores(boxes[0,:,:],objectness[0,:,0],max_output_size=20,iou_threshold=0.6,score_threshold=0.5)#,soft_nms_sigma=0.5)
-            selected_boxes = tf.gather(boxes, selected_indices,axis=1)
-            return selected_boxes,selected_scores
-            #return boxes
+
+            #selected_boxes = tf.gather(boxes, tf.where(objectness>0.5,axis=1)
+            #selected_indices, selected_scores = non_max_suppression_with_scores(boxes[0,:,:],objectness[0,:,0],max_output_size=20,iou_threshold=0.6,score_threshold=0.5)#,soft_nms_sigma=0.5)
+            #selected_boxes = tf.gather(boxes, selected_indices,axis=1)
+
+           
+
+
+    def get_config(self):
+        base_config = super().get_config().copy()
+        base_config.update({"num_classes": self.num_classes,
+        "iou_thresh":self.iou_thresh,
+        "obj_threshold":self.obj_threshold,
+        "max_output_size":self.max_output_size})        
+        return base_config
 
 class TinyYOLOv3(Model):
 

@@ -135,6 +135,7 @@ class BasicBlock(Layer):
 
         return base_config
 
+
 class PredictionLayer(Layer):
     '''
     Clase de la clase Prediction Layer. ESta capa calcula las predicciones de la red, calcula las coordenadas (x,y) y las dimensiones (w,h)
@@ -175,7 +176,7 @@ class PredictionLayer(Layer):
 
         self.strides = 1./ self.grid_size
 
-    def call(self, X):
+    def call(self, X,use_msle=False):
 
         #Se redimensiona la entrada para tener dimensiones (Batch_size,grid_size*grid_size*anchors,()
         X = tf.reshape(X,[-1,self.grid_size*self.grid_size*self.num_anchors,self.final_conv_length])
@@ -194,8 +195,16 @@ class PredictionLayer(Layer):
         #print(self.anchors_matrix)
         if not self.training:
             box_xy = tf.sigmoid(box_xy)
-            box_xy = (box_xy + self.x_y_offset)*self.strides #Se encontra la coordenada (x,y) global del bouding box
-            box_wh = tf.exp(box_wh) * self.anchors_matrix #Se encuenta el ancho (eje X) y alto (eje Y) para cada bouding box
+            if use_msle==True:
+                box_wh = box_wh * self.anchors_matrix #Se encuenta el ancho (eje X) y alto (eje Y) para cada bouding box    
+            else:
+                box_wh = tf.exp(box_wh) * self.anchors_matrix #Se encuenta el ancho (eje X) y alto (eje Y) para cada bouding box
+            
+            if self.num_classes>1:
+                box_xy = (box_xy + self.x_y_offset)*self.strides #Se encontra la coordenada (x,y) global del bouding box
+            else:
+                box_xy = (box_xy) + self.x_y_offset*self.strides #Se encontra la coordenada (x,y) global del bouding box
+
         else:
             pass
 
@@ -265,7 +274,7 @@ class NMSLayer(Layer):
         
         #boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
         #print(boxes.shape)
-
+        
         if self.num_classes >1:
             #
             boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
@@ -274,19 +283,29 @@ class NMSLayer(Layer):
             return output
         else:
             #boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y,objectness], axis=-1)
-            #
+            #return boxes
+            
             boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
             #return tf.gather(boxes,tf.where(objectness[0,:,0]>0.5),axis=(1))[0,:,0,0,:]
 
-            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=15,max_total_size=15,iou_threshold=0.6,score_threshold=0.5)
-            return output[0][0,:output[3][0],:]
-            
+            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=40,max_total_size=40,iou_threshold=0.6,score_threshold=0.5)
+            return output[0][:,:output[3][0],:],output[1][:,:output[3][0]][0]
+            #return output[0][:,:output[3][0],:]
+            #return output[0]
 
             #selected_boxes = tf.gather(boxes, tf.where(objectness>0.5,axis=1)
             #selected_indices, selected_scores = non_max_suppression_with_scores(boxes[0,:,:],objectness[0,:,0],max_output_size=20,iou_threshold=0.6,score_threshold=0.5)#,soft_nms_sigma=0.5)
             #selected_boxes = tf.gather(boxes, selected_indices,axis=1)
-
-           
+        '''
+        boxes = tf.concat([top_left_x, top_left_y, bottom_right_x, bottom_right_y], axis=-1)[:,:,tf.newaxis,:]
+        print(boxes.shape)
+        if self.num_classes >1:
+            #classes*
+            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=20,max_total_size=100,iou_threshold=0.4,score_threshold=0.5)
+        else:
+            output = combined_non_max_suppression(boxes,objectness,max_output_size_per_class=20,max_total_size=20,iou_threshold=0.4,score_threshold=0.5)
+        return output
+        '''   
 
 
     def get_config(self):
@@ -322,10 +341,10 @@ class TinyYOLOv3(Model):
         self.block6 = BasicBlock(num_filters = 512, kernel_size = 3,max_pool_stride=1,name="BasicBlock6",trainable=entrenable,bn_train_state = self.train)
         self.block7 = BasicBlock(num_filters = 1024, kernel_size = 3,max_pooling=False,name="BasicBlock7",trainable=entrenable,bn_train_state = self.train)
         self.block8 = BasicBlock(num_filters = 256, kernel_size = 1,max_pooling=False,name="BasicBlock8",trainable=entrenable,bn_train_state = self.train)
-        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False,name="BasicBlock9",trainable=True,bn_train_state = self.train)
+        self.block9 = BasicBlock(num_filters = 512, kernel_size = 3,max_pooling=False,name="BasicBlock9",trainable=entrenable,bn_train_state = self.train)
         self.block10 = BasicBlock(num_filters = self.filter_prediction_layer, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock1")
         self.block11 = BasicBlock(num_filters = 128,kernel_size = 1,max_pooling = False,name="BasicBlock11",trainable=entrenable,bn_train_state = self.train)
-        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False,name="BasicBlock12",trainable=True,bn_train_state = self.train)
+        self.block12 = BasicBlock(num_filters = 256,kernel_size = 3,max_pooling = False,name="BasicBlock12",trainable=entrenable,bn_train_state = self.train)
         self.block13 = BasicBlock(num_filters = self.filter_prediction_layer, kernel_size = 1, batch_norm =False, max_pooling=False, activation = None,name="FinalBlock2")
         self.concat_block = Concatenate(axis=-1,name="Concatenate")
         self.upsamp = UpSampling2D(size = 2,interpolation = "nearest",name="Upsampling")
@@ -437,7 +456,7 @@ class TinyYOLOv3(Model):
             #Se acumula el número de pesos cargados.
             total_parametros += layer_parametros
 
-
+            print(total_parametros)
         fp.close()
     
         return total_parametros

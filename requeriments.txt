@@ -1,4 +1,0 @@
-scikit-image
-imgaug
-pandas
-pycocotools
